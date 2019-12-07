@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters: 
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Default Image ID for EC2 Instances
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+Mappings:
+  EnvironmentVariables:
+    dev:
+      LogLevel: debug
+    staging:
+      LogLevel: info
+    prod:
+      LogLevel: error
+
+Resources:
+  ProcessingServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: c5.large
+      ImageId: !Ref ImageId
+  Lambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Environment: 
+        Variables:
+          LogLevel: !FindInMap [EnvironmentVariables, !Ref Environment, LogLevel]
+      Code:
+        ZipFile: 
+          !Sub |-
+            exports.handler = async ctx => ({
+              hello: ${AWS::Region}
+            })
+      Handler: index.handler
+      Role: !ImportValue IAMLambdaRole
+      Runtime: nodejs8.10

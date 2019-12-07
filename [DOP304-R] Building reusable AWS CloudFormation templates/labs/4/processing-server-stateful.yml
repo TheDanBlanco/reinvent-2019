@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Resources:
+  SQSProcessing:
+    Type: AWS::SQS::Queue
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Endpoint: fake-email@fake-fake-fake-email.com
+          Protocol: email
+  ProcessingServerBucket:
+    Type: AWS::S3::Bucket
+            
+Outputs:
+  SQSProcessing:
+    Description: SQS export
+    Value: !GetAtt SQSProcessing.Arn
+    Export:
+      Name: SQSProcessingQueue
+  SNSTopic: 
+    Description: SNSTopic export
+    Value: !Ref SNSTopic
+    Export:
+      Name: SNSTopic

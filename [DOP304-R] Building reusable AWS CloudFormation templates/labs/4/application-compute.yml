@@ -1,0 +1,18 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters: 
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Default Image ID for EC2 Instances
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+
+Resources:
+  EC2Server:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.large
+      ImageId: !Ref ImageId
+  EC2ServerBackup:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.large
+      ImageId: !Ref ImageId

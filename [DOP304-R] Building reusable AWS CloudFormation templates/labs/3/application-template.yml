@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters: 
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Default Image ID for EC2 Instances
+    Default: '/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2'
+  ApplicationName:
+    Type: String
+    Default: my-application-
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+Mappings:
+  EnvironmentVariables:
+    dev:
+      LogLevel: debug
+    staging:
+      LogLevel: info
+    prod:
+      LogLevel: error
+
+Resources:
+  SQSProcessing:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${ApplicationName}queue
+  EC2Server:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.large
+      ImageId: !Ref ImageId
+  EC2ServerBackup:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.large
+      ImageId: !Ref ImageId
+  ProcessingServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: c5.large
+      ImageId: !Ref ImageId
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${ApplicationName}sns-topic
+      Subscription:
+        - Endpoint: fake-email@fake-fake-fake-email.com
+          Protocol: email
+  Lambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Environment: 
+        Variables:
+          LogLevel: !FindInMap [EnvironmentVariables, !Ref Environment, LogLevel]
+      Code:
+        ZipFile: 
+          !Sub |-
+            exports.handler = async ctx => ({
+              hello: ${AWS::Region}
+            })
+      Handler: index.handler
+      Role: !GetAtt IAMLambdaRole.Arn
+      Runtime: nodejs8.10
+  IAMLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ApplicationName}lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeImages
+                Resource: '*'
+  LambdaInvocationsAnomalyDetector:
+    Type: AWS::CloudWatch::AnomalyDetector
+    Properties:
+      MetricName: Invocations
+      Namespace: AWS/Lambda
+      Stat: Sum
+  LambdaInvocationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lambda invocations
+      AlarmName: LambdaInvocationsAlarm
+      ComparisonOperator: LessThanLowerOrGreaterThanUpperThreshold
+      EvaluationPeriods: 1
+      Metrics:
+      - Expression: ANOMALY_DETECTION_BAND(m1, 2)
+        Id: ad1
+      - Id: m1
+        MetricStat:
+          Metric:
+            MetricName: Invocations
+            Namespace: AWS/Lambda
+          Period: !!int 86400
+          Stat: Sum
+      ThresholdMetricId: ad1
+      TreatMissingData: breaching
+  ProcessingServerBucket:
+    Type: AWS::S3::Bucket
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${ApplicationName}table
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+            
+Outputs:
+  SQSProcessing:
+    Description: SQS export
+    Value: !GetAtt SQSProcessing.Arn
+    Export:
+      Name: SQSProcessingQueue
+  DynamoDBTable:
+    Description: DynamoDB export
+    Value: !GetAtt DynamoDBTable.Arn
+    Export:
+      Name: DynamoDBTable
+  IAMLambdaRole:
+    Description: IamLambdaRole export
+    Value: !GetAtt IAMLambdaRole.Arn
+    Export:
+      Name: IAMLambdaRole
+  SNSTopic: 
+    Description: SNSTopic export
+    Value: !Ref SNSTopic
+    Export:
+      Name: SNSTopic

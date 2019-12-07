@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters: 
+  ImageId:
+    Type: String
+    Description: Default Image ID for EC2 Instances
+    Default: ami-000b133338f7f4255
+  ApplicationName:
+    Type: String
+    Default: my-application-
+  Environment:
+    Type: String
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+Mappings:
+  EnvironmentVariables:
+    dev:
+      LogLevel: debug
+    staging:
+      LogLevel: info
+    prod:
+      LogLevel: error
+
+Resources:
+  SQSProcessing:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: my-application-queue
+  EC2Server:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.large
+      ImageId: ami-000b133338f7f4255
+  EC2ServerBackup:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: m5.large
+      ImageId: ami-000b133338f7f4255
+  ProcessingServer:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: c5.large
+      ImageId: ami-000b133338f7f4255
+  SNSTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: my-application-sns-topic
+      Subscription:
+        - Endpoint: fake-email@fake-fake-fake-email.com
+          Protocol: email
+  Lambda:
+    Type: AWS::Lambda::Function
+    DependsOn: IAMLambdaRole
+    Properties:
+      Environment: 
+        Variables:
+          LogLevel: debug
+      Code:
+        ZipFile: 
+          !Join 
+          - ''
+          - - 'exports.handler = async ctx => ({ '
+            - 'hello: "'
+            - !Ref AWS::Region
+            - '" })'
+      Handler: index.handler
+      Role: 
+        !Join
+          - ''
+          - - 'arn:aws:iam::'
+            - !Ref AWS::AccountId
+            - ':role/my-application-lambda-role'
+      Runtime: nodejs8.10
+  IAMLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: my-application-lambda-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeImages
+                Resource: '*'
+  LambdaInvocationsAnomalyDetector:
+    Type: AWS::CloudWatch::AnomalyDetector
+    Properties:
+      MetricName: Invocations
+      Namespace: AWS/Lambda
+      Stat: Sum
+  LambdaInvocationsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Lambda invocations
+      AlarmName: LambdaInvocationsAlarm
+      ComparisonOperator: LessThanLowerOrGreaterThanUpperThreshold
+      EvaluationPeriods: 1
+      Metrics:
+      - Expression: ANOMALY_DETECTION_BAND(m1, 2)
+        Id: ad1
+      - Id: m1
+        MetricStat:
+          Metric:
+            MetricName: Invocations
+            Namespace: AWS/Lambda
+          Period: !!int 86400
+          Stat: Sum
+      ThresholdMetricId: ad1
+      TreatMissingData: breaching
+  ProcessingServerBucket:
+    Type: AWS::S3::Bucket
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: my-application-table
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+            
+Outputs:
+  SQSProcessing:
+    Description: SQS export
+    Export:
+      Name: SQSProcessingQueue
+  DynamoDBTable:
+    Description: DynamoDB export
+    Export:
+      Name: DynamoDBTable
+  IAMLambdaRole:
+    Description: IamLambdaRole export
+    Export:
+      Name: IAMLambdaRole
+  SNSTopic: 
+    Description: SNSTopic export
+    Export:
+      Name: SNSTopic
